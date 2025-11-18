@@ -1,0 +1,64 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Log files
+*.log
+logs/
+
+# Docker volumes
+docker-data/
+
+# Kubernetes secrets
+deploy/k8s/secrets/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Generated protobuf files (可选，如果不想提交生成的代码)
+# **/**.pb.go
+
+# Build artifacts
+*.tar
+*.gz
+*.zip
+
