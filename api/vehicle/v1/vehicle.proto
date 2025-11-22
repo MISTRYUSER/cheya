@@ -1,0 +1,33 @@
+syntax = "proto3";
+package vehicle.v1;
+
+option go_package = "github.com/cheya/api/vehicle/v1;vehiclev1";
+
+service VehicleService{
+    rpc GetVehicle(GetVehicleRequest) returns (GetVehicleResponse);
+    rpc CreateVehicle(CreateVehicleRequest) returns (CreateVehicleReponse);
+}
+message GetVehicleRequest{
+    string vehicle_id = 1;
+}
+message GetVehicleResponse{
+    Vehicle vehicle = 1;
+}
+message CreateVehicleRequest{
+    string vin = 1;
+    string license_plate = 2;
+}
+message CreateVehicleReponse{
+    string vehicle_id = 1;
+}
+message Vehicle {
+    string id = 1;
+    string vin = 2;
+    string license_plate = 3;
+    VehicleStatus status = 4;
+}
+enum VehicleStatus{
+    VEHICLE_STATUS_UNSPECIFIED = 0;
+    VEHICLE_STATUS_OFFLINE = 1;
+    VEHICLE_STATUS_ONLINE = 2;
+}
