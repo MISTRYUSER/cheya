@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>CheYa Live Monitor</title>
+</head>
+
+<body>
+    <h2>🚚 CheYa Real-time Telemetry</h2>
+    <div id="log"
+        style="font-family: monospace; height: 400px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px;"></div>
+
+    <script>
+        const ws = new WebSocket("ws://localhost:8081/ws");
+        const logDiv = document.getElementById("log");
+
+        ws.onopen = () => {
+            logDiv.innerHTML += "<div style='color:green'>✅ Connected to Gateway!</div>";
+        };
+
+        ws.onmessage = (event) => {
+            // 解析 JSON
+            const data = JSON.parse(event.data);
+            const line = `<div>
+                <span style='color:blue'>[${new Date().toLocaleTimeString()}]</span> 
+                <b>${data.vehicle_id}</b> 
+                Speed: <span style='color:red'>${data.speed.toFixed(1)} km/h</span>
+                Loc: (${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)})
+            </div>`;
+
+            logDiv.innerHTML = line + logDiv.innerHTML; // 最新消息插在最上面
+        };
+    </script>
+</body>
+
+</html>
