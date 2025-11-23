@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package telemetry.v1;
+
+option go_package = "github.com/xuewentao/cheya/api/telemetry/v1;telemetryv1";
+
+service TelemetryService {
+    rpc UploadTelemetry(UploadTelemetryRequest) returns (UploadTelemetryResponse);
+}
+
+message UploadTelemetryRequest {
+    string vehicle_id = 1;      //VIN 车架号
+    string tinestamp = 2;       //上报时间
+    Location location = 3;      // 位置信息
+    double speed = 4;           // 速度 (km/h)
+    double battery_level = 5;   // 电量/油量百分比 (0-100)
+    double engine_temp = 6;     // 发动机温度
+}
+
+message UploadTelemetryResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message Location {
+    double latitude = 1;
+    double longitude = 2;
+}
