@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -33,7 +34,7 @@ var upgrader = websocket.Upgrader{
 func main() {
 	//初始化 client  用网关来使用 http
 	//生产环境一般使用服务发现
-	conn, err := grpc.NewClient("localhost: 50051",
+	conn, err := grpc.NewClient("localhost:50051",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
@@ -43,9 +44,13 @@ func main() {
 	//创建 grpc client 存根
 	vehicleClient := vehiclev1.NewVehicleServiceClient(conn)
 	log.Println("✅ Connected to Vehicle Service(gRPC)")
+
+	// 创建 Redis 客户端
+	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	defer rdb.Close()
+
 	//1.Redis 订阅
 	go func() {
-		rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
 		log.Println("👂 Gateway subscribing to Redis channel: vehicle:update")
 
 		sub := rdb.Subscribe(context.Background(), "vehicle:update")
@@ -77,6 +82,21 @@ func main() {
 	//3.初始化 Gin
 	r := gin.Default()
 
+	// CORS 中间件 - 允许前端跨域访问
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	})
+
 	//定义路由 GET /api/vi/vehicles/:id
 	r.GET("/api/v1/vehicles/:id", func(c *gin.Context) {
 		//获取 URL 参数
@@ -107,6 +127,87 @@ func main() {
 		})
 	})
 
+	//GET /api/v1/vehicles
+	r.GET("/api/v1/vehicles", func(c *gin.Context) {
+		// 从查询参数获取分页信息，设置默认值
+		page := int32(1)
+		pageSize := int32(100)
+
+		// 解析 page 参数
+		if pageParam := c.Query("page"); pageParam != "" {
+			if p, err := strconv.ParseInt(pageParam, 10, 32); err == nil && p > 0 {
+				page = int32(p)
+			}
+		}
+
+		// 解析 pageSize 参数
+		if pageSizeParam := c.Query("pageSize"); pageSizeParam != "" {
+			if ps, err := strconv.ParseInt(pageSizeParam, 10, 32); err == nil && ps > 0 {
+				pageSize = int32(ps)
+			}
+		}
+
+		//构造 grpc 请求
+		req := &vehiclev1.ListVehiclesRequest{
+			Page:     page,
+			PageSize: pageSize,
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		//2.调用 grpc
+		resp, err := vehicleClient.ListVehicles(ctx, req)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		//返回 json
+		c.JSON(200, gin.H{
+			"code": 200,
+			"data": gin.H{
+				"items": resp.Vehicles,
+				"total": resp.TotalCount,
+			},
+		})
+	})
+
+	// 车辆控制接口
+	r.POST("/api/v1/vehicles/:vin/control", func(c *gin.Context) {
+		vin := c.Param("vin")
+
+		var body struct {
+			Action string `json:"action"`
+		}
+
+		if err := c.BindJSON(&body); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid request body"})
+			return
+		}
+
+		// 验证动作类型
+		if body.Action != "STOP" && body.Action != "START" {
+			c.JSON(400, gin.H{"error": "Invalid action. Must be STOP or START"})
+			return
+		}
+
+		// 构造命令并发布到 Redis
+		cmd := body.Action + ":" + vin
+		err := rdb.Publish(context.Background(), "vehicle:commands", cmd).Err()
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+
+		log.Printf("📢 Command sent: %s for vehicle %s", body.Action, vin)
+		c.JSON(200, gin.H{
+			"code":    200,
+			"message": "Command sent successfully",
+			"data": gin.H{
+				"vin":    vin,
+				"action": body.Action,
+			},
+		})
+	})
 	//WebSocket 结构
 	//ws 指的是 WebSocket 连接对象
 	r.GET("/ws", func(c *gin.Context) {

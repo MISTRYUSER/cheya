@@ -31,8 +31,6 @@ func StartTelemetryConsumer(ctx context.Context, brokers []string, topic string,
 		MaxWait:  100 * time.Millisecond, // 最多等待 100ms
 	})
 
-	
-	
 	//函数结束后关闭
 	defer func() {
 		if err := r.Close(); err != nil {
