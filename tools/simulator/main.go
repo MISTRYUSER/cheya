@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -35,7 +36,8 @@ func main() {
 	//VIN
 	vehicleID := "VIN-TEST-SIM-01"
 
-	//控制标志位
+	//控制标志位 - 使用 mutex 保护并发访问
+	var mu sync.Mutex
 	isRunning := true
 	wasStopped := false // 用于跟踪是否已经打印过停止日志
 
@@ -48,11 +50,15 @@ func main() {
 		for msg := range ch {
 			if msg.Payload == "STOP:"+vehicleID {
 				log.Println("🛑 收到远程停车指令！！！")
+				mu.Lock()
 				isRunning = false
+				mu.Unlock()
 			} else if msg.Payload == "START:"+vehicleID {
 				log.Println("▶️ 收到远程启动指令")
+				mu.Lock()
 				isRunning = true
 				wasStopped = false // 重置标志
+				mu.Unlock()
 			}
 		}
 	}()
@@ -63,19 +69,29 @@ func main() {
 	log.Printf("🚀 Simulator started for vehicle: %s", vehicleID)
 
 	for {
-		if !isRunning {
-			if !wasStopped {
+		// 使用 mutex 保护对共享变量的访问
+		mu.Lock()
+		running := isRunning
+		stopped := wasStopped
+		mu.Unlock()
+
+		if !running {
+			if !stopped {
 				log.Println("⏸️  车辆已停止，等待恢复指令...")
+				mu.Lock()
 				wasStopped = true
+				mu.Unlock()
 			}
 			time.Sleep(1 * time.Second)
 			continue
 		}
-		
+
 		// 恢复运行时打印日志
-		if wasStopped {
+		if stopped {
 			log.Println("✅ 车辆已恢复运行")
+			mu.Lock()
 			wasStopped = false
+			mu.Unlock()
 		}
 		//1.模拟移动
 		lat += (rand.Float64() - 0.5) * 0.001
