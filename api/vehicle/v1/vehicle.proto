@@ -6,6 +6,8 @@ option go_package = "github.com/cheya/api/vehicle/v1;vehiclev1";
 service VehicleService{
     rpc GetVehicle(GetVehicleRequest) returns (GetVehicleResponse);
     rpc CreateVehicle(CreateVehicleRequest) returns (CreateVehicleReponse);
+
+    rpc ListVehicles(ListVehiclesRequest) returns (ListVehiclesResponse);
 }
 message GetVehicleRequest{
     string vehicle_id = 1;
@@ -30,4 +32,13 @@ enum VehicleStatus{
     VEHICLE_STATUS_UNSPECIFIED = 0;
     VEHICLE_STATUS_OFFLINE = 1;
     VEHICLE_STATUS_ONLINE = 2;
+}
+
+message ListVehiclesRequest{
+    int32 page = 1;  //页码
+    int32 page_size = 2; //一页有多少
+}
+message ListVehiclesResponse{
+    repeated Vehicle vehicles = 1;//车辆列表
+    int32 total_count = 2; //总数
 }
