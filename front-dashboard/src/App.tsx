@@ -5,11 +5,12 @@ import SaaSLayout from './layouts/SaaSLayout'
 import DashboardOverviewPage from './pages/DashboardOverviewPage'
 import DashboardMapPage from './pages/DashboardMapPage'
 import DashboardListPage from './pages/DashboardListPage'
+import Dashboard from './components/Dashboard'
 
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/dashboard/overview" replace />} />
+      <Route path="/" element={<Dashboard />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       

@@ -9,16 +9,17 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
 func main() {
 	//1.连接 grpc 服务器
 	//这里是 client 所以 server 是监听 这里是 Dial被弃用现在是 NewClient
 	// WithTransportCredentials(insecure...) 表示不使用 TLS (仅限内网/开发)
-	conn,err := grpc.NewClient("localhost: 50051",
+	conn, err := grpc.NewClient("localhost:50051",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 
-	if err != nil{
-		log.Fatalf("❌failed to create client: %v",err)
+	if err != nil {
+		log.Fatalf("❌failed to create client: %v", err)
 	}
 	defer conn.Close()
 
@@ -26,7 +27,7 @@ func main() {
 	c := vehiclev1.NewVehicleServiceClient(conn)
 
 	//设置超时 1s
-	ctx,cancel := context.WithTimeout(context.Background(),time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	//mock 一辆新车
@@ -36,8 +37,8 @@ func main() {
 
 	log.Printf("🛠️  Creating Vehicle with VIN: %s ...", vin)
 
-	createResp,err := c.CreateVehicle(ctx,&vehiclev1.CreateVehicleRequest{
-		Vin: vin,
+	createResp, err := c.CreateVehicle(ctx, &vehiclev1.CreateVehicleRequest{
+		Vin:          vin,
 		LicensePlate: plate,
 	})
 
@@ -49,7 +50,7 @@ func main() {
 
 	//查询
 	log.Printf("🔍 Querying Vehicle with VIN: %s ...", vin)
-	GetResp,err := c.GetVehicle(ctx,&vehiclev1.GetVehicleRequest{
+	GetResp, err := c.GetVehicle(ctx, &vehiclev1.GetVehicleRequest{
 		VehicleId: vin,
 	})
 	if err != nil {
