@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	authv1 "github.com/xuewentao/cheya/api/auth/v1"
 	vehiclev1 "github.com/xuewentao/cheya/api/vehicle/v1"
 )
 
@@ -208,6 +209,31 @@ func main() {
 			},
 		})
 	})
+
+	//连接 auth service
+	authConn, _ := grpc.NewClient("localhost:50054", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	authClient := authv1.NewAuthServiceClient(authConn)
+	//Login
+	r.POST("/api/v1/auth/login", func(c *gin.Context) {
+		var req authv1.LoginRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid body"})
+			return
+		}
+
+		resp, err := authClient.Login(context.Background(), &req)
+		if err != nil {
+			c.JSON(401, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"access_token": resp.AccessToken,
+			"expires_in":   resp.ExpiresIn,
+			"username":     resp.Userme,
+		})
+	})
+
 	//WebSocket 结构
 	//ws 指的是 WebSocket 连接对象
 	r.GET("/ws", func(c *gin.Context) {
