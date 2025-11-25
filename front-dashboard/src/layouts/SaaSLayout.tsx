@@ -1,7 +1,23 @@
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import ThemeToggle from '../components/ThemeToggle'
 
 const SaaSLayout = () => {
+  const navigate = useNavigate()
+
+  // 获取当前用户名
+  const username = localStorage.getItem('username') || '用户'
+
+  // 登出处理函数
+  const handleLogout = () => {
+    // 清除本地存储
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('username')
+    localStorage.removeItem('token_expires_at')
+    
+    // 跳转到登录页
+    navigate('/login')
+  }
+
   return (
     <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
       {/* Sidebar - 毛玻璃效果 */}
@@ -77,11 +93,22 @@ const SaaSLayout = () => {
             CheYa - 自动驾驶卡车监控平台
           </h2>
           <div className="flex items-center gap-4">
+            {/* 用户信息 */}
+            <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+              <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{username}</span>
+            </div>
+
             {/* 主题切换按钮 */}
             <ThemeToggle />
             
             {/* 登出按钮 */}
-            <button className="bg-red-600 dark:bg-red-700 text-white px-6 py-2 rounded-lg font-semibold hover:bg-red-700 dark:hover:bg-red-800 transition duration-200 shadow-md">
+            <button
+              onClick={handleLogout}
+              className="bg-red-600 dark:bg-red-700 text-white px-6 py-2 rounded-lg font-semibold hover:bg-red-700 dark:hover:bg-red-800 transition duration-200 shadow-md"
+            >
               登出
             </button>
           </div>
