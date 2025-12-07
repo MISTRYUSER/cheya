@@ -14,6 +14,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket" // ✅ 新增
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -81,6 +82,24 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func buildGRPCContext(c *gin.Context,timeout time.Duration) (context.Context,context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(),timeout)
+	//从gin Context 获取用户信息
+	userID,exist1 := c.Get("userID")
+	username,exist2 := c.Get("username")
+
+	//如果存在用户信息构建 grpc metaData	
+	if exist1 && exist2 {
+		log.Printf("📤 Propagating context: userID=%v, username=%v", userID, username)  // 调试日志
+		md := metadata.Pairs(
+			"x-user-id", fmt.Sprintf("%v",userID),
+			"x-user-name",fmt.Sprintf("%v",username),
+		)
+		ctx = metadata.NewOutgoingContext(ctx, md)
+	}
+	return ctx,cancel
 }
 func main() {
 	//初始化 client  用网关来使用 http
@@ -218,7 +237,10 @@ func main() {
 		vehicleID := c.Param("id")
 
 		//设置超时上下文
-		ctx, concel := context.WithTimeout(context.Background(), 2*time.Second)
+		//old
+		//ctx, concel := context.WithTimeout(context.Background(), 2*time.Second)
+		//设置metadata 传递链路信息
+		ctx, concel := buildGRPCContext(c,2 * time.Second)
 		defer concel()
 
 		//发起 gRPC 调用
@@ -267,7 +289,7 @@ func main() {
 			Page:     page,
 			PageSize: pageSize,
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := buildGRPCContext(c, time.Second)
 		defer cancel()
 
 		//2.调用 grpc
