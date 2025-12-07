@@ -4,51 +4,42 @@ import (
 	"context"
 	"log"
 	"net"
-	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	authv1 "github.com/xuewentao/cheya/api/auth/v1"
+	"github.com/xuewentao/cheya/apps/auth/ent"
+	"github.com/xuewentao/cheya/apps/auth/server"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	_ "github.com/lib/pq"
 )
-
-var jwtSecret = []byte("cheya-super-secret-key-2025")
-
-type AuthServer struct {
-	authv1.UnimplementedAuthServiceServer
-}
-
-func (c *AuthServer) Login(ctx context.Context, req *authv1.LoginRequest) (*authv1.LoginResponse, error) {
-	//暂时模拟校验
-	if req.Username != "admin" || req.Password != "123456" {
-		return nil, status.Errorf(codes.Unauthenticated, "用户名或密码错误")
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  "u-001",
-		"username": req.Username,
-		"exp":      time.Now().Add(24 * time.Hour).Unix(),
-	})
-
-	tokenString, err := token.SignedString(jwtSecret)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "生成token失败: %v", err)
-	}
-
-	return &authv1.LoginResponse{
-		AccessToken: tokenString,
-		ExpiresIn:   86400, // 24小时 = 86400秒
-		Userme:      req.Username,
-	}, nil
-}
 func main() {
-	lis,err := net.Listen("tcp",":50054")
-	if err != nil { 
-		log.Fatalf("failed to listen : %v",err)
-	}	
-	s := grpc.NewServer()
-	authv1.RegisterAuthServiceServer(s,&AuthServer{})
+	//1.链接数据库
+	dns := "host=localhost port=5432 user=wentao_xue dbname=cheya password=Woe89132 sslmode=disable"
+	client, err := ent.Open("postgres",dns)
+	if err != nil {
+		log.Fatalf("❌ failed opening connection to postgres: %v", err)
+	}
+	defer client.Close()
 
-	log.Println("Auth service is running on:50054")
-	s.Serve(lis)
+	//2.自动迁移
+	//在 db中自动创建 user
+	log.Println("📦 Migrating database schema...")
+	if err := client.Schema.Create(context.Background()); err != nil {
+		log.Fatalf("❌ failed creating schema resources: %v", err)
+	}
+	log.Println("✅ Schema migrated successfully!")
+
+	//3.启动 grpc
+	lis, err := net.Listen("tcp",":50054")
+	if err != nil{
+		log.Fatalf("❌ failed to listen : %v", err)
+	}
+
+	s := grpc.NewServer()
+	//注入 client 到 server
+	authv1.RegisterAuthServiceServer(s,server.NewAuthServer(client))
+	log.Printf("🚀 Auth Service is running on :50054")
+	//4.启动服务
+	if err := s.Serve(lis);err != nil {
+		log.Fatalf("failed to server %v", err)
+	}
 }

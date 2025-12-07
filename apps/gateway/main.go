@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	_"github.com/golang-jwt/jwt/v5"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket" // ✅ 新增
 	"github.com/redis/go-redis/v9"
@@ -17,6 +18,10 @@ import (
 	authv1 "github.com/xuewentao/cheya/api/auth/v1"
 	vehiclev1 "github.com/xuewentao/cheya/api/vehicle/v1"
 )
+
+
+//jwt-Secret
+var jwtSecret = []byte("cheya-super-secret-key-2025")
 
 // 简易连接池
 var (
@@ -210,7 +215,7 @@ func main() {
 		})
 	})
 
-	//连接 auth service
+	//连接 auth service login
 	authConn, _ := grpc.NewClient("localhost:50054", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	authClient := authv1.NewAuthServiceClient(authConn)
 	//Login
@@ -230,10 +235,29 @@ func main() {
 		c.JSON(200, gin.H{
 			"access_token": resp.AccessToken,
 			"expires_in":   resp.ExpiresIn,
-			"username":     resp.Userme,
+			"username":     resp.Username,
 		})
 	})
+	r.POST("/api/v1/auth/register",func(c *gin.Context) {
+		var req authv1.RegisterRequest
+		if err := c.ShouldBindJSON(&req);err != nil {
+			c.JSON(400, gin.H{"error": "Invalid body"})
+			return
+		}
 
+		resp,err := authClient.Register(context.Background(),&req) 
+		if err != nil {
+			c.JSON(401,gin.H{"error":err.Error()})
+			return
+		}
+		c.JSON(201,gin.H {
+			"code" :    resp.Code,
+			"message": 	resp.Message,
+			"user_id":  resp.UserId,
+			"username": resp.Username,
+			"created_at":resp.CreatedAt,
+		})
+	})
 	//WebSocket 结构
 	//ws 指的是 WebSocket 连接对象
 	r.GET("/ws", func(c *gin.Context) {
