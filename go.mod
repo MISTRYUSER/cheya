@@ -7,6 +7,7 @@ toolchain go1.24.10
 require (
 	entgo.io/ent v0.14.5
 	github.com/gin-gonic/gin v1.11.0
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/lib/pq v1.10.9
 	github.com/redis/go-redis/v9 v9.17.0
@@ -33,7 +34,6 @@ require (
 	github.com/go-playground/validator/v10 v10.27.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/hcl/v2 v2.18.1 // indirect
