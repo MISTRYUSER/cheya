@@ -2,14 +2,16 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
-	_"github.com/golang-jwt/jwt/v5"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket" // ✅ 新增
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
@@ -19,8 +21,7 @@ import (
 	vehiclev1 "github.com/xuewentao/cheya/api/vehicle/v1"
 )
 
-
-//jwt-Secret
+// jwt-Secret
 var jwtSecret = []byte("cheya-super-secret-key-2025")
 
 // 简易连接池
@@ -37,6 +38,50 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// UserClaim
+type UserClaim struct {
+	jwt.RegisteredClaims
+	UserID   int    `json:"sub"`
+	Username string `json:"username"`
+}
+
+// 鉴权
+func JWTAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		auth := c.GetHeader("Authorization")
+		if auth == "" || !strings.HasPrefix(auth, "Bearer ") {
+			c.JSON(401, gin.H{"error": "mission or invalid Authorization header"})
+			c.Abort()
+			return
+		}
+		tokenString := auth[7:]
+		token, err := jwt.ParseWithClaims(tokenString, &UserClaim{}, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexceptio signin method")
+			}
+			return jwtSecret, nil
+		})
+
+		if err != nil || !token.Valid {
+			c.JSON(401, gin.H{"error": "invaild token"})
+			c.Abort()
+			return
+		}
+
+		claims, ok := token.Claims.(*UserClaim)
+		if !ok {
+			c.JSON(401, gin.H{"error": "invalid claims"})
+			c.Abort()
+			return
+		}
+
+		//信息写入上下文
+		c.Set("userID", claims.UserID)
+		c.Set("username", claims.Username)
+
+		c.Next()
+	}
+}
 func main() {
 	//初始化 client  用网关来使用 http
 	//生产环境一般使用服务发现
@@ -103,8 +148,72 @@ func main() {
 		c.Next()
 	})
 
+	//连接 auth service login
+	authConn, _ := grpc.NewClient("localhost:50054", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	authClient := authv1.NewAuthServiceClient(authConn)
+	//Login
+	r.POST("/api/v1/auth/login", func(c *gin.Context) {
+		var req authv1.LoginRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid body"})
+			return
+		}
+
+		resp, err := authClient.Login(context.Background(), &req)
+		if err != nil {
+			c.JSON(401, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"access_token": resp.AccessToken,
+			"expires_in":   resp.ExpiresIn,
+			"username":     resp.Username,
+		})
+	})
+	r.POST("/api/v1/auth/register", func(c *gin.Context) {
+		var req authv1.RegisterRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"code": 400, "message": "请求格式错误"})
+			return
+		}
+
+		resp, err := authClient.Register(context.Background(), &req)
+		if err != nil {
+			// 解析 gRPC 错误，返回友好的错误信息
+			errMsg := err.Error()
+			statusCode := 400
+
+			// 根据错误内容判断状态码和消息
+			if strings.Contains(errMsg, "已存在") || strings.Contains(errMsg, "AlreadyExists") {
+				statusCode = 409 // Conflict
+				c.JSON(statusCode, gin.H{"code": statusCode, "message": "用户名已存在"})
+				return
+			}
+			if strings.Contains(errMsg, "密码不一致") || strings.Contains(errMsg, "InvalidArgument") {
+				c.JSON(statusCode, gin.H{"code": statusCode, "message": "两次密码不一致"})
+				return
+			}
+
+			// 默认错误
+			c.JSON(statusCode, gin.H{"code": statusCode, "message": "注册失败，请稍后重试"})
+			return
+		}
+
+		c.JSON(201, gin.H{
+			"code":       resp.Code,
+			"message":    resp.Message,
+			"user_id":    resp.UserId,
+			"username":   resp.Username,
+			"created_at": resp.CreatedAt,
+		})
+	})
+
+	//受到保护的漏油
+	protected := r.Group("/api/v1")
+	protected.Use(JWTAuthMiddleware())
 	//定义路由 GET /api/vi/vehicles/:id
-	r.GET("/api/v1/vehicles/:id", func(c *gin.Context) {
+	protected.GET("/vehicles/:id", func(c *gin.Context) {
 		//获取 URL 参数
 		vehicleID := c.Param("id")
 
@@ -134,7 +243,7 @@ func main() {
 	})
 
 	//GET /api/v1/vehicles
-	r.GET("/api/v1/vehicles", func(c *gin.Context) {
+	protected.GET("/vehicles", func(c *gin.Context) {
 		// 从查询参数获取分页信息，设置默认值
 		page := int32(1)
 		pageSize := int32(100)
@@ -178,7 +287,7 @@ func main() {
 	})
 
 	// 车辆控制接口
-	r.POST("/api/v1/vehicles/:vin/control", func(c *gin.Context) {
+	protected.POST("/vehicles/:vin/control", func(c *gin.Context) {
 		vin := c.Param("vin")
 
 		var body struct {
@@ -215,49 +324,6 @@ func main() {
 		})
 	})
 
-	//连接 auth service login
-	authConn, _ := grpc.NewClient("localhost:50054", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	authClient := authv1.NewAuthServiceClient(authConn)
-	//Login
-	r.POST("/api/v1/auth/login", func(c *gin.Context) {
-		var req authv1.LoginRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid body"})
-			return
-		}
-
-		resp, err := authClient.Login(context.Background(), &req)
-		if err != nil {
-			c.JSON(401, gin.H{"error": err.Error()})
-			return
-		}
-
-		c.JSON(200, gin.H{
-			"access_token": resp.AccessToken,
-			"expires_in":   resp.ExpiresIn,
-			"username":     resp.Username,
-		})
-	})
-	r.POST("/api/v1/auth/register",func(c *gin.Context) {
-		var req authv1.RegisterRequest
-		if err := c.ShouldBindJSON(&req);err != nil {
-			c.JSON(400, gin.H{"error": "Invalid body"})
-			return
-		}
-
-		resp,err := authClient.Register(context.Background(),&req) 
-		if err != nil {
-			c.JSON(401,gin.H{"error":err.Error()})
-			return
-		}
-		c.JSON(201,gin.H {
-			"code" :    resp.Code,
-			"message": 	resp.Message,
-			"user_id":  resp.UserId,
-			"username": resp.Username,
-			"created_at":resp.CreatedAt,
-		})
-	})
 	//WebSocket 结构
 	//ws 指的是 WebSocket 连接对象
 	r.GET("/ws", func(c *gin.Context) {
