@@ -55,7 +55,7 @@ function App() {
   return (
     <Routes>
       {/* 主页 - 需要登录 */}
-      <Route
+      <Route 
         path="/"
         element={
           <ProtectedRoute>

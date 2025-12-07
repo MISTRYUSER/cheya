@@ -6,6 +6,7 @@ option go_package = "github.com/xuewentao/cheya/api/auth/v1;auth.v1";
 
 service AuthService {
     rpc Login(LoginRequest) returns (LoginResponse);
+    rpc Register(RegisterRequest) returns (RegisterResponse);
 }
 
 message LoginRequest {
@@ -16,5 +17,19 @@ message LoginRequest {
 message LoginResponse {
     string access_token = 1;//JWT
     int32 expires_in = 2; //过期时间
-    string userme = 3;
+    string username = 3;
+}
+
+message RegisterRequest {
+    string username = 1;
+    string password = 2;
+    string confirm_password = 3;
+    string email = 4;
+}
+message RegisterResponse {
+    int32 code = 1;
+    string message = 2;
+    int64 user_id = 3;
+    string username = 4;
+    string created_at = 5;
 }
