@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>海浪模拟 + 克苏鲁巨兽（性能优化版）</title>
+    <style>
+        :root {
+            --glass: rgba(255, 255, 255, .08);
+            --stroke: rgba(255, 255, 255, .14);
+            --text: rgba(255, 255, 255, .92);
+            --muted: rgba(255, 255, 255, .70);
+            --shadow: 0 18px 70px rgba(0, 0, 0, .55);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background: #02040b;
+        }
+
+        #app {
+            position: fixed;
+            inset: 0;
+        }
+
+        canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .hud {
+            position: fixed;
+            left: 14px;
+            top: 14px;
+            z-index: 20;
+            width: min(460px, calc(100vw - 28px));
+            padding: 12px 12px 10px;
+            border-radius: 18px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, .10), rgba(255, 255, 255, .05));
+            border: 1px solid var(--stroke);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            box-shadow: var(--shadow);
+            color: var(--text);
+            user-select: none;
+        }
+
+        .hud h1 {
+            margin: 0 0 6px 0;
+            font-size: 14px;
+            letter-spacing: .4px;
+        }
+
+        .hud p {
+            margin: 0 0 10px 0;
+            font-size: 12px;
+            color: var(--muted);
+            line-height: 1.45;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 92px 1fr 58px;
+            gap: 10px;
+            align-items: center;
+            margin: 8px 0;
+        }
+
+        .row label {
+            font-size: 12px;
+            color: rgba(255, 255, 255, .82);
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: rgba(180, 220, 255, .9);
+        }
+
+        .val {
+            font-size: 12px;
+            text-align: right;
+            color: rgba(255, 255, 255, .86);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .toggles {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            border: none;
+            cursor: pointer;
+            padding: 8px 10px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, .09);
+            border: 1px solid rgba(255, 255, 255, .14);
+            color: rgba(255, 255, 255, .88);
+            font-size: 12px;
+            box-shadow: 0 10px 26px rgba(0, 0, 0, .28);
+            transition: transform .08s ease, background .2s ease;
+            user-select: none;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, .12);
+        }
+
+        .btn:active {
+            transform: translateY(1px) scale(.99);
+        }
+
+        .btn.on {
+            background: rgba(120, 255, 210, .16);
+            border-color: rgba(120, 255, 210, .22);
+        }
+
+        .hint {
+            position: fixed;
+            right: 14px;
+            top: 14px;
+            z-index: 20;
+            padding: 10px 12px;
+            border-radius: 18px;
+            background: rgba(0, 0, 0, .30);
+            border: 1px solid rgba(255, 255, 255, .10);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            color: rgba(255, 255, 255, .78);
+            font-size: 12px;
+            max-width: 360px;
+            box-shadow: 0 18px 70px rgba(0, 0, 0, .45);
+            user-select: none;
+        }
+
+        .hint b {
+            color: rgba(255, 255, 255, .92);
+        }
+
+        .err {
+            position: fixed;
+            inset: 0;
+            display: none;
+            place-items: center;
+            background: radial-gradient(900px 600px at 50% 30%, rgba(255, 255, 255, .06), rgba(0, 0, 0, .92));
+            color: rgba(255, 255, 255, .92);
+            z-index: 50;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .err .box {
+            max-width: 560px;
+            padding: 18px 16px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, .06);
+            border: 1px solid rgba(255, 255, 255, .12);
+        }
+
+        .err h2 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+        }
+
+        .err p {
+            margin: 0;
+            color: rgba(255, 255, 255, .76);
+            line-height: 1.5;
+            font-size: 13px;
+        }
+
+        @media (max-width: 560px) {
+            .hint {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <canvas id="gl"></canvas>
+
+        <div class="hud">
+            <h1>海浪模拟 + 克苏鲁巨兽（性能优化版）</h1>
+            <p>这版重点是不卡：水上巨兽只在附近区域 raymarch，并且不在 march 里疯狂算海面高度。画质可切换。</p>
+
+            <div class="row">
+                <label>风速</label>
+                <input id="wind" type="range" min="0" max="1" step="0.001" value="0.56" />
+                <div class="val" id="windVal">0.56</div>
+            </div>
+
+            <div class="row">
+                <label>浪高</label>
+                <input id="wave" type="range" min="0" max="1" step="0.001" value="0.62" />
+                <div class="val" id="waveVal">0.62</div>
+            </div>
+
+            <div class="row">
+                <label>光照</label>
+                <input id="light" type="range" min="0" max="1" step="0.001" value="0.50" />
+                <div class="val" id="lightVal">0.50</div>
+            </div>
+
+            <div class="row">
+                <label>出没强度</label>
+                <input id="presence" type="range" min="0" max="1" step="0.001" value="0.72" />
+                <div class="val" id="presenceVal">0.72</div>
+            </div>
+
+            <div class="toggles">
+                <button class="btn on" id="btnUnder">水下巨兽：开</button>
+                <button class="btn on" id="btnSurface">水上巨兽：开</button>
+                <button class="btn on" id="btnVignette">暗角：开</button>
+                <button class="btn on" id="btnQuality">画质：中</button>
+                <button class="btn" id="btnReset">重置</button>
+            </div>
+        </div>
+
+        <div class="hint">
+            <b>操作：</b>左键拖动摆镜头；滚轮缩放。<br />
+            <span style="color:rgba(255,255,255,.62)">如果还卡：把「画质」切到低；或者关「水上巨兽」。</span>
+        </div>
+
+        <div class="err" id="err">
+            <div class="box">
+                <h2>WebGL 不可用</h2>
+                <p>当前环境无法创建 WebGL 上下文。换桌面浏览器/开启硬件加速/更新驱动通常就能解决。</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (() => {
+            const canvas = document.getElementById('gl');
+            const err = document.getElementById('err');
+
+            const gl = canvas.getContext('webgl', { antialias: false, alpha: false, premultipliedAlpha: false });
+            if (!gl) {
+                err.style.display = 'grid';
+                return;
+            }
+
+            // ===== Quality presets =====
+            // q = 0(低) 0.5(中) 1(高)
+            const QUALITY = [
+                { name: '低', q: 0.0, dprCap: 1.0 },
+                { name: '中', q: 0.5, dprCap: 1.25 },
+                { name: '高', q: 1.0, dprCap: 1.6 },
+            ];
+            let qIndex = 1;
+
+            function resize() {
+                const dpr = Math.min(QUALITY[qIndex].dprCap, window.devicePixelRatio || 1);
+                const w = Math.floor(innerWidth * dpr);
+                const h = Math.floor(innerHeight * dpr);
+                if (canvas.width !== w || canvas.height !== h) {
+                    canvas.width = w; canvas.height = h;
+                    gl.viewport(0, 0, w, h);
+                }
+            }
+            window.addEventListener('resize', resize, { passive: true });
+            resize();
+
+            // ===== Shader utils =====
+            function compile(type, src) {
+                const s = gl.createShader(type);
+                gl.shaderSource(s, src);
+                gl.compileShader(s);
+                if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+                    console.error(gl.getShaderInfoLog(s));
+                    throw new Error('Shader compile error');
+                }
+                return s;
+            }
+            function link(vs, fs) {
+                const p = gl.createProgram();
+                gl.attachShader(p, vs);
+                gl.attachShader(p, fs);
+                gl.linkProgram(p);
+                if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+                    console.error(gl.getProgramInfoLog(p));
+                    throw new Error('Program link error');
+                }
+                return p;
+            }
+
+            const quad = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+                -1, -1, 1, -1, -1, 1,
+                -1, 1, 1, -1, 1, 1
+            ]), gl.STATIC_DRAW);
+
+            const VS = `
+  attribute vec2 aPos;
+  varying vec2 vUv;
+  void main(){
+    vUv = aPos*0.5 + 0.5;
+    gl_Position = vec4(aPos, 0.0, 1.0);
+  }`;
+
+            // 性能关键改动：
+            // 1) raymarch 只在离巨兽中心一定半径内执行
+            // 2) raymarch 内不再每一步算 waterHeight（极贵），用近似“水面阈值”判断是否露出
+            // 3) fbm 变成 4 层（够用），波方向 4 组（够真实）
+            const FS = `
+  precision mediump float;
+  varying vec2 vUv;
+
+  uniform vec2 uRes;
+  uniform float uTime;
+
+  uniform float uWind;
+  uniform float uWave;
+  uniform float uLight;
+  uniform float uPresence;
+
+  uniform float uBeastUnder;
+  uniform float uBeastSurface;
+  uniform float uVignette;
+
+  uniform vec2 uCam;
+  uniform float uZoom;
+
+  uniform float uQ; // 0..1 画质参数
+
+  float hash21(vec2 p){
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p+45.32);
+    return fract(p.x*p.y);
+  }
+  float noise(vec2 p){
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0,0.0));
+    float c = hash21(i + vec2(0.0,1.0));
+    float d = hash21(i + vec2(1.0,1.0));
+    vec2 u = f*f*(3.0 - 2.0*f);
+    return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+  }
+  float fbm4(vec2 p){
+    float v=0.0;
+    float a=0.5;
+    mat2 m=mat2(1.6,1.2,-1.2,1.6);
+    for(int i=0;i<4;i++){
+      v += a*noise(p);
+      p = m*p;
+      a *= 0.55;
+    }
+    return v;
+  }
+
+  vec3 sky(vec3 rd){
+    float k = clamp(rd.y*0.5 + 0.5, 0.0, 1.0);
+    vec3 top = vec3(0.01, 0.03, 0.10);
+    vec3 mid = vec3(0.02, 0.05, 0.14);
+    vec3 bot = vec3(0.004,0.010,0.045);
+    vec3 c = mix(bot, mix(mid, top, k), k);
+    return c;
+  }
+
+  float waveCoreFast(vec2 p, float t, float wind){
+    vec2 mainDir = normalize(vec2(0.78, 0.30));
+    float speed = mix(0.55, 2.15, wind);
+    float w=0.0;
+    // 4 组方向够“真”，便宜很多
+    for(int i=0;i<4;i++){
+      float fi=float(i);
+      float ang = 0.55 + fi*1.35;
+      vec2 d = normalize(vec2(cos(ang), sin(ang)));
+      d = normalize(mix(d, mainDir, 0.62));
+      float freq = mix(1.3, 4.6, fi/3.0);
+      float phase = t*speed*(0.95 + fi*0.22);
+      float s = sin(dot(p,d)*freq + phase);
+      float c = cos(dot(p, vec2(-d.y,d.x))*(freq*0.85) - phase*0.72);
+      w += (s + 0.55*c)/4.0;
+    }
+    float rip = fbm4(p*2.2 + vec2(t*0.08, -t*0.06));
+    w += (rip - 0.5)*0.55;
+    return w;
+  }
+
+  float surfPhase(float t, float presence){
+    float s = 0.5 + 0.5*sin(t*0.075);
+    s = smoothstep(0.50, 0.92, s);
+    s = pow(s, mix(1.35, 0.75, presence));
+    return clamp(s, 0.0, 1.0);
+  }
+
+  vec3 beastCenter(float t, float surf){
+    float x = sin(t*0.06)*1.00 + cos(t*0.03)*0.40;
+    float z = cos(t*0.05)*0.70 + sin(t*0.02)*0.28;
+    z -= surf * 1.35;
+    float y = mix(-1.10, 0.55, surf);
+    return vec3(x, y, z);
+  }
+
+  float sdEllipsoid(vec3 p, vec3 r){
+    float k0 = length(p/r);
+    float k1 = length(p/(r*r));
+    return k0*(k0-1.0)/k1;
+  }
+  float sdCapsule(vec3 p, vec3 a, vec3 b, float r){
+    vec3 pa = p - a, ba = b - a;
+    float h = clamp(dot(pa,ba)/dot(ba,ba), 0.0, 1.0);
+    return length(pa - ba*h) - r;
+  }
+  float smin(float a, float b, float k){
+    float h = clamp(0.5 + 0.5*(b-a)/k, 0.0, 1.0);
+    return mix(b,a,h) - k*h*(1.0-h);
+  }
+
+  float beastSDF(vec3 p, float t, float surf){
+    float a = 0.45*sin(t*0.04) + 0.18*surf;
+    mat2 R = mat2(cos(a),-sin(a), sin(a), cos(a));
+    p.xz = R * p.xz;
+
+    float body = sdEllipsoid(p - vec3(0.0, 0.08, 0.0), vec3(1.55, 0.55, 0.75));
+    float head = sdEllipsoid(p - vec3(1.35, 0.02, 0.0), vec3(0.65, 0.45, 0.55));
+    float d = smin(body, head, 0.35);
+
+    // 简化骨刺数量（性能）
+    float ridgeD = 1e9;
+    for(int i=0;i<5;i++){
+      float fi=float(i);
+      vec3 rp = p - vec3(-0.80 + fi*0.46, 0.42 + 0.08*sin(t*0.6 + fi*1.0), 0.0);
+      float r = sdEllipsoid(rp, vec3(0.18, 0.14, 0.14));
+      ridgeD = min(ridgeD, r);
+    }
+    d = smin(d, ridgeD + mix(0.18, 0.06, surf), 0.25);
+
+    // 触手数量按画质缩放：低=4，中=6，高=7（通过 break 控制）
+    float tentD = 1e9;
+    for(int i=0;i<7;i++){
+      if (uQ < 0.2 && i >= 4) break;
+      if (uQ < 0.8 && i >= 6) break;
+      float fi=float(i);
+      float side = (fi-3.0)*0.14;
+      vec3 a0 = vec3(1.15, -0.15, side);
+      vec3 b0 = vec3(1.85, -0.95 - fi*0.10, side*1.15);
+      b0.y += 0.22*sin(t*0.8 + fi*1.7 + p.x*1.5);
+      b0.z += 0.20*sin(t*0.7 + fi*1.3);
+      float r = mix(0.11, 0.07, fi/6.0);
+      tentD = min(tentD, sdCapsule(p, a0, b0, r));
+    }
+    d = smin(d, tentD, 0.22);
+
+    return d;
+  }
+
+  vec3 sdfNormal(vec3 p, float t, float surf){
+    float e = 0.0025;
+    vec2 h = vec2(e,0.0);
+    float dx = beastSDF(p + vec3(h.x,h.y,h.y), t, surf) - beastSDF(p - vec3(h.x,h.y,h.y), t, surf);
+    float dy = beastSDF(p + vec3(h.y,h.x,h.y), t, surf) - beastSDF(p - vec3(h.y,h.x,h.y), t, surf);
+    float dz = beastSDF(p + vec3(h.y,h.y,h.x), t, surf) - beastSDF(p - vec3(h.y,h.y,h.x), t, surf);
+    return normalize(vec3(dx,dy,dz));
+  }
+
+  float fresnelSchlick(float cosTheta, float F0){
+    return F0 + (1.0-F0)*pow(1.0-cosTheta, 5.0);
+  }
+
+  // 便宜的水面高度（只用于水面本体）：一次 waveCoreFast + 4层 fbm
+  float waterHeightFast(vec2 p, float t, float wind, float waveAmp, vec3 bc, float surf, out float foamHint){
+    float amp = mix(0.05, 0.22, waveAmp);
+    float choppy = mix(0.85, 1.45, wind);
+    float w = waveCoreFast(p, t, wind);
+    float h = w*amp;
+    h = sign(h) * pow(abs(h), choppy);
+
+    foamHint = 0.0;
+
+    float beastOn = step(0.5, max(uBeastUnder, uBeastSurface));
+    if (beastOn > 0.5){
+      vec2 c = bc.xz;
+      float r = length(p - c);
+      float bulge = exp(-r*r*1.2) * (0.10 + 0.20*surf) * (0.35 + 0.65*waveAmp);
+      float trail = fbm4(p*1.4 + vec2(-t*0.18, t*0.12));
+      float wake = exp(-r*r*2.4) * (trail-0.5) * (0.07 + 0.12*wind) * (0.35 + 0.65*surf);
+      h += bulge + wake;
+      foamHint += exp(-r*r*3.2) * (0.30 + 0.70*surf);
+    }
+
+    foamHint += smoothstep(0.60, 0.95, abs(w)) * (0.25 + 0.55*wind);
+    return h;
+  }
+
+  vec3 waterNormalFast(vec2 p, float t, float wind, float waveAmp, vec3 bc, float surf, out float foamHint){
+    float e = 0.0030;
+    float f0, fx, fy;
+    float foam0, foamx, foamy;
+    f0 = waterHeightFast(p, t, wind, waveAmp, bc, surf, foam0);
+    fx = waterHeightFast(p + vec2(e,0.0), t, wind, waveAmp, bc, surf, foamx);
+    fy = waterHeightFast(p + vec2(0.0,e), t, wind, waveAmp, bc, surf, foamy);
+    foamHint = (foam0 + foamx + foamy)/3.0;
+    return normalize(vec3(-(fx-f0)/e, 1.0, -(fy-f0)/e));
+  }
+
+  void main(){
+    vec2 uv = vUv;
+    vec2 ndc = uv*2.0 - 1.0;
+    ndc.x *= uRes.x/uRes.y;
+
+    float wind = uWind;
+    float waveAmp = uWave;
+    float lightK = uLight;
+
+    // camera
+    vec2 cam = uCam * 0.25;
+    float zoom = mix(1.32, 0.92, uZoom);
+
+    vec3 ro = vec3(0.0, 1.45, 3.05*zoom);
+    vec3 ta = vec3(cam.x, 0.0, cam.y);
+
+    vec3 ww = normalize(ta - ro);
+    vec3 uu = normalize(cross(vec3(0.0,1.0,0.0), ww));
+    vec3 vv = cross(ww, uu);
+    vec3 rd = normalize(uu*ndc.x + vv*(ndc.y*0.85) + ww*1.55);
+
+    float surf = surfPhase(uTime, uPresence);
+    vec3 bc = beastCenter(uTime, surf);
+
+    // Intersect sea plane as baseline
+    float tPlane = (0.0 - ro.y)/rd.y;
+    if (tPlane < 0.0){
+      gl_FragColor = vec4(sky(rd), 1.0);
+      return;
+    }
+
+    vec3 posPlane = ro + rd*tPlane;
+    vec2 sp = posPlane.xz * 0.58;
+
+    float foam;
+    float h = waterHeightFast(sp, uTime, wind, waveAmp, bc, surf, foam);
+
+    float t = (h - ro.y)/rd.y;
+    vec3 pos = ro + rd*t;
+    sp = pos.xz * 0.58;
+
+    vec3 wn = waterNormalFast(sp, uTime, wind, waveAmp, bc, surf, foam);
+
+    vec3 sunDir = normalize(vec3(0.28, 0.72, -0.18));
+    float ndotl = clamp(dot(wn, sunDir), 0.0, 1.0);
+    float ndotv = clamp(dot(wn, -rd), 0.0, 1.0);
+
+    vec3 deep = vec3(0.003, 0.030, 0.060);
+    vec3 mid  = vec3(0.010, 0.070, 0.120);
+    vec3 base = mix(deep, mid, 0.72);
+
+    vec3 hh = normalize(sunDir - rd);
+    float shin = mix(80.0, 170.0, lightK);
+    float spec = pow(clamp(dot(wn, hh), 0.0, 1.0), shin) * mix(0.14, 0.90, lightK);
+
+    float F = fresnelSchlick(ndotv, 0.03 + 0.05*lightK);
+    vec3 refl = sky(reflect(rd, wn));
+
+    vec3 col = base;
+    col += ndotl * vec3(0.010, 0.030, 0.040) * (0.28 + 0.72*lightK);
+    col += spec * vec3(0.70, 0.85, 1.00);
+    col = mix(col, refl, F);
+
+    // foam
+    float foamK = smoothstep(0.82, 1.28, foam) * (0.22 + 0.55*wind);
+    col = mix(col, vec3(0.22,0.28,0.32), foamK*0.55);
+
+    // fog
+    float dist = length(pos - ro);
+    float fog = 1.0 - exp(-dist * mix(0.040, 0.060, 1.0-lightK));
+    vec3 fogC = sky(normalize(vec3(rd.x, max(rd.y, 0.0), rd.z)));
+    col = mix(col, fogC, fog*0.62);
+
+    // ===== Beast: surface (raymarch only near center) =====
+    float threat = 0.0;
+    float surfActive = smoothstep(0.18, 0.60, surf) * uPresence;
+
+    if (uBeastSurface > 0.5 && surfActive > 0.02){
+      // 距离裁剪：离中心太远直接不 march
+      vec2 d2 = sp - bc.xz;
+      float r2 = dot(d2,d2);
+
+      // 半径随画质/出没调整：低更小、更省
+      float R = mix(1.25, 1.85, uQ) * (0.75 + 0.25*uPresence);
+      if (r2 < R*R){
+        float tMax = 18.0;
+        float tCur = 0.0;
+
+        float hit = 0.0;
+        vec3 pHit = vec3(0.0);
+
+        // 近似水面阈值：不再每步算水面高度（省到飞起）
+        float waterGate = 0.02 + 0.20*uWave; // 浪高越大，门槛越高
+
+        // 步数按画质变化（常量循环+break 兼容 WebGL1）
+        int maxSteps = 48;
+        if (uQ < 0.2) maxSteps = 26;
+        else if (uQ < 0.8) maxSteps = 36;
+
+        for(int i=0;i<48;i++){
+          if (i >= maxSteps) break;
+
+          vec3 p = ro + rd*tCur;
+          vec2 psp = (p.xz)*0.58;
+
+          vec3 pLocal;
+          pLocal.xz = psp - bc.xz;
+          pLocal.y  = p.y - bc.y;
+
+          float d = beastSDF(pLocal, uTime, surf);
+
+          // 只在“近似水面以上”允许命中
+          float above = step(waterGate, p.y);
+
+          // 步长加大（更省），低画质更大
+          float minStep = mix(0.012, 0.020, 1.0-uQ);
+          float maxStep = mix(0.18,  0.26,  1.0-uQ);
+
+          float stepD = d;
+          if (above < 0.5) stepD = max(d, 0.04);
+          if (d < 0.0018 && above > 0.5){
+            hit = 1.0;
+            pHit = p;
+            break;
+          }
+
+          tCur += clamp(stepD, minStep, maxStep);
+          if (tCur > tMax) break;
+        }
+
+        if (hit > 0.5){
+          vec2 psp = (pHit.xz)*0.58;
+          vec3 pLocal;
+          pLocal.xz = psp - bc.xz;
+          pLocal.y  = pHit.y - bc.y;
+
+          vec3 n = sdfNormal(pLocal, uTime, surf);
+
+          vec3 albedo = vec3(0.020, 0.040, 0.030);
+          float tex = fbm4(pLocal.xz*2.0 + vec2(uTime*0.12, -uTime*0.08));
+          albedo *= (0.85 + 0.55*tex);
+
+          float diff = clamp(dot(n, sunDir), 0.0, 1.0);
+          vec3 h2 = normalize(sunDir - rd);
+          float spec2 = pow(clamp(dot(n, h2), 0.0, 1.0), mix(70.0, 150.0, lightK));
+          spec2 *= (0.22 + 0.80*lightK);
+
+          float ndv2 = clamp(dot(n, -rd), 0.0, 1.0);
+          float F2 = fresnelSchlick(ndv2, 0.08);
+          vec3 r2c = sky(reflect(rd, n));
+
+          vec3 beastCol = albedo;
+          beastCol += diff * vec3(0.05,0.07,0.06) * (0.35 + 0.65*lightK);
+          beastCol += spec2 * vec3(0.65,0.80,1.0);
+          beastCol = mix(beastCol, r2c, F2*0.55);
+
+          // 简化飞沫（便宜）
+          float spray = smoothstep(0.10, 0.00, abs(pHit.y));
+          spray *= (0.20 + 0.80*surf);
+          vec3 mist = vec3(0.12, 0.16, 0.20) * spray * (0.55 + 0.45*lightK);
+
+          col = beastCol + mist;
+          threat = clamp(0.35 + 0.65*surf, 0.0, 1.0);
+        }
+      }
+    }
+
+    // ===== Beast: underwater shadow =====
+    if (uBeastUnder > 0.5){
+      vec2 d = sp - bc.xz;
+      float r = length(d);
+      float shadow = exp(-r*r*1.25) * (0.10 + 0.32*surf) * (0.55 + 0.45*(1.0-lightK));
+      float k = (threat > 0.01) ? 0.45 : 1.0;
+      col *= (1.0 - shadow*k);
+      threat = max(threat, clamp(surf*0.55, 0.0, 1.0));
+    }
+
+    // ring foam near beast
+    float beastOn = step(0.5, max(uBeastUnder, uBeastSurface));
+    if (beastOn > 0.5){
+      float rr = length(sp - bc.xz);
+      float ring = exp(-rr*rr*3.0) * (0.16 + 0.52*surf);
+      col = mix(col, vec3(0.20,0.26,0.30), ring*0.55);
+    }
+
+    // grain
+    float g = (noise(uv*uRes*0.25 + uTime*0.55) - 0.5);
+    col += g * 0.010 * (0.6 + 0.6*(1.0-lightK));
+
+    // vignette + pressure
+    if (uVignette > 0.5){
+      float v = smoothstep(1.20, 0.30, length(ndc));
+      float baseV = mix(0.70, 1.0, v);
+      float press = mix(1.0, 0.86, threat);
+      col *= baseV * press;
+    }
+
+    // tonemap
+    col = pow(col, vec3(0.96));
+    col = col / (col + vec3(0.78));
+    col = clamp(col, 0.0, 1.0);
+
+    gl_FragColor = vec4(col, 1.0);
+  }`;
+
+            const program = link(compile(gl.VERTEX_SHADER, VS), compile(gl.FRAGMENT_SHADER, FS));
+            gl.useProgram(program);
+
+            const aPos = gl.getAttribLocation(program, 'aPos');
+            gl.enableVertexAttribArray(aPos);
+            gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+            gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+            const U = (name) => gl.getUniformLocation(program, name);
+            const uRes = U('uRes');
+            const uTime = U('uTime');
+            const uWind = U('uWind');
+            const uWave = U('uWave');
+            const uLight = U('uLight');
+            const uPresence = U('uPresence');
+            const uBeastUnder = U('uBeastUnder');
+            const uBeastSurface = U('uBeastSurface');
+            const uVignette = U('uVignette');
+            const uCam = U('uCam');
+            const uZoom = U('uZoom');
+            const uQ = U('uQ');
+
+            // ===== UI =====
+            const windEl = document.getElementById('wind');
+            const waveEl = document.getElementById('wave');
+            const lightEl = document.getElementById('light');
+            const presenceEl = document.getElementById('presence');
+
+            const windVal = document.getElementById('windVal');
+            const waveVal = document.getElementById('waveVal');
+            const lightVal = document.getElementById('lightVal');
+            const presenceVal = document.getElementById('presenceVal');
+
+            const btnUnder = document.getElementById('btnUnder');
+            const btnSurface = document.getElementById('btnSurface');
+            const btnVignette = document.getElementById('btnVignette');
+            const btnQuality = document.getElementById('btnQuality');
+            const btnReset = document.getElementById('btnReset');
+
+            let state = {
+                wind: parseFloat(windEl.value),
+                wave: parseFloat(waveEl.value),
+                light: parseFloat(lightEl.value),
+                presence: parseFloat(presenceEl.value),
+                under: 1,
+                surface: 1,
+                vignette: 1,
+            };
+
+            function upd() {
+                windVal.textContent = state.wind.toFixed(2);
+                waveVal.textContent = state.wave.toFixed(2);
+                lightVal.textContent = state.light.toFixed(2);
+                presenceVal.textContent = state.presence.toFixed(2);
+
+                btnUnder.classList.toggle('on', !!state.under);
+                btnUnder.textContent = state.under ? '水下巨兽：开' : '水下巨兽：关';
+
+                btnSurface.classList.toggle('on', !!state.surface);
+                btnSurface.textContent = state.surface ? '水上巨兽：开' : '水上巨兽：关';
+
+                btnVignette.classList.toggle('on', !!state.vignette);
+                btnVignette.textContent = state.vignette ? '暗角：开' : '暗角：关';
+
+                btnQuality.classList.toggle('on', true);
+                btnQuality.textContent = `画质：${QUALITY[qIndex].name}`;
+                resize();
+            }
+
+            windEl.addEventListener('input', () => { state.wind = parseFloat(windEl.value); upd(); });
+            waveEl.addEventListener('input', () => { state.wave = parseFloat(waveEl.value); upd(); });
+            lightEl.addEventListener('input', () => { state.light = parseFloat(lightEl.value); upd(); });
+            presenceEl.addEventListener('input', () => { state.presence = parseFloat(presenceEl.value); upd(); });
+
+            btnUnder.addEventListener('click', () => { state.under = state.under ? 0 : 1; upd(); });
+            btnSurface.addEventListener('click', () => { state.surface = state.surface ? 0 : 1; upd(); });
+            btnVignette.addEventListener('click', () => { state.vignette = state.vignette ? 0 : 1; upd(); });
+
+            btnQuality.addEventListener('click', () => {
+                qIndex = (qIndex + 1) % QUALITY.length;
+                upd();
+            });
+
+            btnReset.addEventListener('click', () => {
+                state.wind = 0.56; state.wave = 0.62; state.light = 0.50; state.presence = 0.72;
+                state.under = 1; state.surface = 1; state.vignette = 1;
+                qIndex = 1;
+                windEl.value = state.wind; waveEl.value = state.wave; lightEl.value = state.light; presenceEl.value = state.presence;
+                upd();
+            });
+
+            upd();
+
+            // ===== Camera =====
+            const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+            let cam = { x: 0, y: 0 };
+            let targetCam = { x: 0, y: 0 };
+            let zoom = 0.56;
+            let dragging = false;
+            let last = { x: 0, y: 0 };
+
+            canvas.addEventListener('pointerdown', (e) => {
+                dragging = true;
+                last.x = e.clientX; last.y = e.clientY;
+                canvas.setPointerCapture(e.pointerId);
+            });
+            canvas.addEventListener('pointermove', (e) => {
+                if (!dragging) return;
+                const dx = (e.clientX - last.x) / Math.max(1, innerWidth);
+                const dy = (e.clientY - last.y) / Math.max(1, innerHeight);
+                last.x = e.clientX; last.y = e.clientY;
+                targetCam.x = clamp(targetCam.x + dx * 2.0, -1.4, 1.4);
+                targetCam.y = clamp(targetCam.y - dy * 2.0, -1.4, 1.4);
+            });
+            canvas.addEventListener('pointerup', () => dragging = false);
+            canvas.addEventListener('pointercancel', () => dragging = false);
+
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                zoom = clamp(zoom + (e.deltaY > 0 ? 0.04 : -0.04), 0.0, 1.0);
+            }, { passive: false });
+
+            // ===== Render =====
+            const t0 = performance.now();
+            function frame() {
+                resize();
+                const t = (performance.now() - t0) * 0.001;
+
+                cam.x += (targetCam.x - cam.x) * 0.06;
+                cam.y += (targetCam.y - cam.y) * 0.06;
+
+                const beastAny = (state.under || state.surface) ? 1 : 0;
+                const press = beastAny ? (0.002 + 0.010 * state.presence) * (0.55 + 0.45 * (1.0 - state.light)) : 0.0;
+                cam.x += (Math.sin(t * 3.8) + Math.sin(t * 7.1) * 0.7) * press;
+                cam.y += (Math.cos(t * 3.2) + Math.cos(t * 6.3) * 0.6) * press;
+
+                gl.useProgram(program);
+                gl.uniform2f(uRes, canvas.width, canvas.height);
+                gl.uniform1f(uTime, t);
+                gl.uniform1f(uWind, state.wind);
+                gl.uniform1f(uWave, state.wave);
+                gl.uniform1f(uLight, state.light);
+                gl.uniform1f(uPresence, state.presence);
+                gl.uniform1f(uBeastUnder, state.under ? 1.0 : 0.0);
+                gl.uniform1f(uBeastSurface, state.surface ? 1.0 : 0.0);
+                gl.uniform1f(uVignette, state.vignette ? 1.0 : 0.0);
+                gl.uniform2f(uCam, cam.x, cam.y);
+                gl.uniform1f(uZoom, zoom);
+                gl.uniform1f(uQ, QUALITY[qIndex].q);
+
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                requestAnimationFrame(frame);
+            }
+            requestAnimationFrame(frame);
+        })();
+    </script>
+</body>
+
+</html>

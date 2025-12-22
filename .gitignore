@@ -62,6 +62,10 @@ temp/
 *.gz
 *.zip
 
+# Sensitive files and API keys
+eino_quickS/go
+**/go
+
 
 
 
