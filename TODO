@@ -1,0 +1,294 @@
+# CheYa V1 完整开发计划
+
+## 架构概览
+
+```mermaid
+graph TB
+    subgraph Frontend [前端 React]
+        MapPage[地图页面]
+        DetailPage[车辆详情页]
+        ChatUI[AI 对话组件]
+    end
+    
+    subgraph Gateway [API Gateway :8081]
+        HTTP[HTTP API]
+        SSE[SSE 流式接口]
+        WS[WebSocket]
+    end
+    
+    subgraph Services [微服务]
+        AIAgent[AI Agent :50055]
+        Vehicle[Vehicle :50051]
+        Auth[Auth :50054]
+    end
+    
+    subgraph Infra [基础设施]
+        PG[(PostgreSQL)]
+        Redis[(Redis)]
+        Kafka[(Kafka)]
+        LLM[LLM API]
+    end
+    
+    MapPage --> HTTP
+    DetailPage --> HTTP
+    ChatUI --> SSE
+    HTTP --> Vehicle
+    HTTP --> Auth
+    SSE --> AIAgent
+    AIAgent --> LLM
+    Vehicle --> PG
+    AIAgent --> Vehicle
+```
+
+---
+
+## P0: AI Agent 基础对话 (3h)
+
+### 1. 定义 ai.proto
+
+文件: [api/ai/v1/ai.proto](api/ai/v1/ai.proto)
+
+```protobuf
+syntax = "proto3";
+package ai.v1;
+
+option go_package = "github.com/xuewentao/cheya/api/ai/v1;aiv1";
+
+service AIService {
+    // 流式对话 - Server Streaming
+    rpc Chat(ChatRequest) returns (stream ChatResponse);
+    // 单次对话 (可选)
+    rpc ChatOnce(ChatRequest) returns (ChatOnceResponse);
+}
+
+message ChatRequest {
+    string session_id = 1;      // 会话ID，用于多轮对话
+    string message = 2;         // 用户消息
+    repeated Message history = 3; // 历史对话(可选)
+}
+
+message ChatResponse {
+    string content = 1;         // 流式内容片段
+    bool done = 2;              // 是否结束
+}
+
+message ChatOnceResponse {
+    string content = 1;         // 完整回复
+    string session_id = 2;
+}
+
+message Message {
+    string role = 1;            // user/assistant
+    string content = 2;
+}
+```
+
+### 2. 创建 AI Agent 服务
+
+目录结构:
+
+```
+apps/ai-agent/
+├── main.go           # 服务入口，gRPC server :50055
+├── server/
+│   └── ai.go         # AIService 实现
+└── llm/
+    └── client.go     # 复用 eino_quickS/chat 的 LLM 封装
+```
+
+核心逻辑:
+
+- 复用已有的 `eino_quickS/chat/openai.go` 作为 LLM 客户端
+- 实现 `Chat` 流式 RPC：接收用户消息 -> 调用 LLM Stream -> 逐块返回
+- System Prompt: "你是 CheYa 车联网平台的智能助手..."
+
+### 3. Gateway 集成 (SSE)
+
+在 [apps/gateway/main.go](apps/gateway/main.go) 添加:
+
+```go
+// AI 对话 - SSE 流式输出
+r.POST("/api/v1/ai/chat", func(c *gin.Context) {
+    // 设置 SSE headers
+    c.Header("Content-Type", "text/event-stream")
+    c.Header("Cache-Control", "no-cache")
+    
+    // 调用 AI gRPC Stream
+    stream, _ := aiClient.Chat(ctx, &req)
+    for {
+        resp, err := stream.Recv()
+        if err == io.EOF { break }
+        // SSE 格式输出
+        c.SSEvent("message", resp.Content)
+        c.Writer.Flush()
+    }
+})
+```
+
+---
+
+## P1: 前端地图集成 (2h)
+
+### 高德地图集成
+
+文件: [front-dashboard/src/pages/DashboardMapPage.tsx](front-dashboard/src/pages/DashboardMapPage.tsx)
+
+方案: 使用 `@amap/amap-jsapi-loader` + React Hook
+
+功能:
+
+- 初始化高德地图（需要申请 key）
+- 从 `/api/v1/vehicles` 获取车辆列表
+- 在地图上显示车辆 Marker（区分在线/离线状态）
+- 点击 Marker 显示车辆信息弹窗
+- WebSocket 实时更新车辆位置
+
+---
+
+## P1: 前端车辆详情页 (1h)
+
+新建文件: `front-dashboard/src/pages/VehicleDetailPage.tsx`
+
+功能:
+
+- 路由: `/dashboard/vehicles/:id`
+- 调用 `/api/v1/vehicles/:id` 获取详情
+- 展示: VIN、车牌、状态、最后上报时间
+- 操作按钮: 启动/停止（调用控制接口）
+
+---
+
+## P2: Docker Compose 完善 (2h)
+
+更新 [docker-compose.yml](docker-compose.yml):
+
+新增服务:
+
+```yaml
+services:
+  # 现有: postgres, redis, kafka...
+  
+  gateway:
+    build: ./apps/gateway
+    ports: ["8081:8081"]
+    depends_on: [postgres, redis, kafka]
+    
+  vehicle:
+    build: ./apps/vehicle
+    ports: ["50051:50051"]
+    
+  auth:
+    build: ./apps/auth
+    ports: ["50054:50054"]
+    
+  ai-agent:
+    build: ./apps/ai-agent
+    ports: ["50055:50055"]
+    environment:
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - LLM_API_KEY=${LLM_API_KEY}
+      
+  frontend:
+    build: ./front-dashboard
+    ports: ["5173:80"]
+```
+
+为每个服务创建 Dockerfile。
+
+---
+
+## P2: Makefile 增强 (0.5h)
+
+更新 [Makefile](Makefile):
+
+```makefile
+# 新增命令
+run-gateway:
+	go run ./apps/gateway
+
+run-vehicle:
+	go run ./apps/vehicle
+
+run-ai:
+	go run ./apps/ai-agent
+
+run-all:
+	make -j4 run-gateway run-vehicle run-auth run-ai
+
+docker-build:
+	docker-compose build
+
+docker-logs:
+	docker-compose logs -f
+```
+
+---
+
+## P2: 配置管理 Viper (1h)
+
+新建 `pkg/config/config.go`:
+
+```go
+type Config struct {
+    Server   ServerConfig
+    Database DatabaseConfig
+    Redis    RedisConfig
+    LLM      LLMConfig
+}
+
+func Load() *Config {
+    viper.SetConfigName("config")
+    viper.AddConfigPath(".")
+    viper.AutomaticEnv()
+    // ...
+}
+```
+
+配置文件 `config.yaml`:
+
+```yaml
+server:
+  port: 8081
+database:
+  host: localhost
+  port: 5432
+llm:
+  base_url: https://api.siliconflow.cn/v1
+  model: Qwen/Qwen2.5-7B-Instruct
+```
+
+---
+
+## 文件变更清单
+
+| 操作 | 文件路径 |
+
+|------|----------|
+
+| 新建 | `api/ai/v1/ai.proto` |
+
+| 新建 | `apps/ai-agent/main.go` |
+
+| 新建 | `apps/ai-agent/server/ai.go` |
+
+| 新建 | `apps/ai-agent/llm/client.go` |
+
+| 修改 | `apps/gateway/main.go` (添加 AI 路由) |
+
+| 修改 | `front-dashboard/src/pages/DashboardMapPage.tsx` |
+
+| 新建 | `front-dashboard/src/pages/VehicleDetailPage.tsx` |
+
+| 新建 | `front-dashboard/src/components/AIChat.tsx` |
+
+| 修改 | `front-dashboard/src/App.tsx` (添加路由) |
+
+| 修改 | `docker-compose.yml` |
+
+| 新建 | `apps/*/Dockerfile` (4个) |
+
+| 修改 | `Makefile` |
+
+| 新建 | `pkg/config/config.go` |
+
+| 新建 | `config.yaml` |

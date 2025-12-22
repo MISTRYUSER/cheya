@@ -90,7 +90,7 @@ const RegisterPage = () => {
       // 注册成功，显示成功消息并跳转到登录页面
       setSuccess(true)
       setTimeout(() => {
-        navigate('/login')
+      navigate('/login')
       }, 1500)
     } catch (err) {
       setError('网络错误，请检查连接后重试')

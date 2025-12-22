@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package ai.v1;
+
+option go_package = "github.com/xuewentao/cheya/api/ai/v1;ai.v1";
+
+service AIService {
+    rpc Chat(ChatRequest) returns (stream ChatResponse);
+}
+message Message {
+    string role = 1;
+    string content = 2;
+}
+message ChatRequest {
+    string user_message = 1;
+    string session_ID = 2;
+    repeated Message history = 3;
+}
+message ChatResponse {
+    string ai_response = 1;
+    bool done = 2;
+}
