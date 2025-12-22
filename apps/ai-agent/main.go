@@ -20,7 +20,7 @@ func main() {
 	//create LLM client
 	llmClient := llm.NewLLMClient (
 		"https://api.siliconflow.cn/v1",
-        "sk-lixunuekoigiqayuoimeggpzeqlrijcrvhgqmjgarwcqsehy",  // 稍后用环境变量
+        "",  // 稍后用环境变量
         "Qwen/Qwen2.5-7B-Instruct",
 	)
 
